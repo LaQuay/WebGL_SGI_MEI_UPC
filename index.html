@@ -1,0 +1,847 @@
+<html>
+
+<head>
+<title>WebGL Marc Vila Pràctica 1</title>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+<script type="text/javascript" src="./libs/glMatrix-0.9.5.min.js"></script>
+<script type="text/javascript" src="./libs/J3DIMath.js"></script>
+<script type="text/javascript" src="./libs/webgl-utils.js"></script>
+
+<script type="text/javascript" src="./models.js"></script>
+<script type="text/javascript" src="./sounds.js"></script>
+<script type="text/javascript" src="./listeners.js"></script>
+<script type="text/javascript" src="./auxiliar.js"></script>
+<script type="text/javascript" src="./matrix_auxiliar.js"></script>
+
+<link rel="stylesheet" type="text/css" href="styles.css">
+
+<script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+	
+    varying vec4 vColor;	
+	varying float vIsFragmentShaderColorActivated;
+	
+    void main(void) {
+		//No existen booleanos en varying asi que si es entre 0.0 y 0.1 es true, si no, falso
+		//Y se aprovecha ese rango entre 0.1 y 1.0 como multiplicador de tamaño de lineas
+		if (vIsFragmentShaderColorActivated > 0.1) {
+			float colorR = 0.0;
+			float colorG = 0.0;
+			float colorB = 0.0;	
+			
+			float offset = vIsFragmentShaderColorActivated*2.0;
+			if (gl_FragCoord.y < (150.0 * offset)) { //lila
+				colorR = 0.47;
+				colorG = 0.16;
+				colorB = 0.55;
+			} else if (gl_FragCoord.y < (300.0 * offset)) {//azul
+				colorR = 0.0;
+				colorG = 0.44;
+				colorB = 0.72;
+			} else if (gl_FragCoord.y < (450.0 * offset)) {//cyan
+				colorR = 0.0;
+				colorG = 0.69;
+				colorB = 0.96;
+			} else if (gl_FragCoord.y < (600.0 * offset)) {//verde
+				colorR = 0.0;
+				colorG = 0.59;
+				colorB = 0.27;
+			} else if (gl_FragCoord.y < (750.0 * offset)) {//amarillo
+				colorR = 1.0;
+				colorG = 0.91;
+				colorB = 0.0;
+			} else if (gl_FragCoord.y < (900.0 * offset)) {//naranja
+				colorR = 0.94;
+				colorG = 0.5;
+				colorB = 0.1;
+			} else if (gl_FragCoord.y < (1050.0 * offset)) {//rojo
+				colorR = 0.9;
+				colorG = 0.0;
+				colorB = 0.15;
+			}
+			gl_FragColor = vec4(colorR, colorG, colorB, 1.0);	
+		} else {
+			gl_FragColor = vColor;		
+		}
+    }
+</script>
+
+<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec4 aVertexColor;
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+	uniform float uIsFragmentShaderColorActivated;
+	uniform float uIsVertexShaderColorActivated;
+    varying vec4 vColor;
+	varying float vIsFragmentShaderColorActivated;
+	
+    void main(void) {
+        gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+				
+		vIsFragmentShaderColorActivated = uIsFragmentShaderColorActivated;		
+		
+		//No existen booleanos en varying asi que si es entre 1 y 0.1 es true, si no, falso
+		if (uIsVertexShaderColorActivated > 0.1) {
+			vColor = vec4(aVertexColor.x*(gl_Position[1]+1.0), aVertexColor.y*(gl_Position[1]+1.0), aVertexColor.z*(gl_Position[1]+1.0), 1.0);
+		} else {
+			vColor = vec4(aVertexColor.x, aVertexColor.y, aVertexColor.z, 1.0);
+		}
+    }
+</script>
+
+<script type="text/javascript">
+	var aSliderColor;
+	var camera;
+    function webGLStart() {
+		aSliderColor = getRandomRGBColors();
+		camera = {
+			"translate": [0, 0, -10],
+			"rotateAng": 0,
+			"rotate": [0, 0, 0],
+			"scale": [1, 1, 1],
+		}
+		
+        var canvas = document.getElementById("practica1-canvas");
+        initGL(canvas);
+        initShaders();
+        initBuffers();
+
+		initModels();
+		
+		initSounds();
+
+        gl.clearColor(1.0, 1.0, 1.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+		
+		setKeyboardListener();
+		
+		initializeControls();
+		
+		toggleHideShow("unselect-item", false);
+		//toggleHideShow("div-help", false);
+		document.getElementById('checkbox-sounds').checked = true;
+        
+        //tick();		
+		
+		drawScene();
+    }
+
+    var gl;
+    function initGL(canvas) {
+        try {
+            gl = canvas.getContext("experimental-webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+    }
+
+    function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+
+    var shaderProgram;
+    function initShaders() {
+        var fragmentShader = getShader(gl, "shader-fs");
+        var vertexShader = getShader(gl, "shader-vs");
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+		
+		shaderProgram.vertexColorAttribute = gl.getAttribLocation(shaderProgram, "aVertexColor");
+        gl.enableVertexAttribArray(shaderProgram.vertexColorAttribute);
+		
+        shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+        shaderProgram.isFragmentShaderColorActivatedUniform = gl.getUniformLocation(shaderProgram, "uIsFragmentShaderColorActivated");
+        shaderProgram.isVertexShaderColorActivatedUniform = gl.getUniformLocation(shaderProgram, "uIsVertexShaderColorActivated");
+		
+        gl.uniform1f(shaderProgram.isFragmentShaderColorActivatedUniform, 0.0);
+        gl.uniform1f(shaderProgram.isVertexShaderColorActivatedUniform, 0.0);
+    }
+	
+	var mvMatrix = mat4.create();
+    var mvMatrixStack = [];
+    var pMatrix = mat4.create();	
+    function setMatrixUniforms() {
+        gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+        gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+    }
+	
+	var pyramid;
+	var sphere;
+	var cube;
+    function initBuffers() {
+		pyramid = getBasePyramid();		
+		
+		pyramid.vertexPositionBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, pyramid.vertexPositionBuffer);	
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pyramid.vertexPositionData), gl.STATIC_DRAW);
+	
+		pyramid.vertexColorBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, pyramid.vertexColorBuffer);	
+		//gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pyramid.vertexColorData), gl.STATIC_DRAW);
+		setOffsetValuesToPosition("pyramid")
+			
+		sphere = getBaseSphere();
+	 
+		sphere.vertexPositionBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, sphere.vertexPositionBuffer);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphere.vertexPositionData), gl.STATIC_DRAW);
+
+		sphere.vertexIndexBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphere.vertexIndexBuffer);
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphere.vertexIndexData), gl.STATIC_DRAW);
+		
+		sphere.vertexColorBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, sphere.vertexColorBuffer);
+		//gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphere.vertexColorData), gl.STATIC_DRAW);
+		setOffsetValuesToPosition("sphere");
+		
+		cube = getBaseCube();		
+		
+		cube.vertexPositionBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, cube.vertexPositionBuffer);	
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cube.vertexPositionData), gl.STATIC_DRAW);
+	
+		cube.vertexColorBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, cube.vertexColorBuffer);	
+		//gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cube.vertexColorData), gl.STATIC_DRAW);
+		setOffsetValuesToPosition("cube");
+		
+		cube.vertexIndexBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cube.vertexIndexBuffer);	
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(cube.vertexIndexData), gl.STATIC_DRAW);
+    }
+
+	var modelObjects;
+	function initModels() {
+		modelObjects = getObjectTG();		
+	}
+	
+    function drawScene() {
+		resize(gl.canvas);
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+		// If checked, camara es perspectiva, si no, ortogonal
+		if (document.getElementById("switch-camera").checked) {
+			mat4.perspective(45, gl.canvas.width / gl.canvas.height, 0.1, 100.0, pMatrix);
+		} else {
+			var ra = gl.canvas.width / gl.canvas.height;
+			mat4.ortho(-3.72*ra, 3.72*ra, -3.72, 3.72, 0.1, 100, pMatrix); //3.72 para que la Ortho y Persp tengan un zoom inicial similar
+		}
+        mat4.identity(mvMatrix);
+		// Camera ajustments
+        mat4.scale(mvMatrix, [camera.scale[0], camera.scale[1], camera.scale[2]]);
+		mat4.rotate(mvMatrix, degToRad(camera.rotateAng), [camera.rotate[0], camera.rotate[1], camera.rotate[2]]);
+        mat4.translate(mvMatrix, [camera.translate[0], camera.translate[1], camera.translate[2]]);
+		
+		for (i = 0; i < modelObjects.pyramidsTG.length; ++i){
+			mvPushMatrix();
+				mat4.scale(mvMatrix, [modelObjects.pyramidsTG[i].scale[0], modelObjects.pyramidsTG[i].scale[1], modelObjects.pyramidsTG[i].scale[2]]);
+				mat4.translate(mvMatrix, [modelObjects.pyramidsTG[i].translate[0], modelObjects.pyramidsTG[i].translate[1], modelObjects.pyramidsTG[i].translate[2]]);	
+				mat4.rotate(mvMatrix, degToRad(modelObjects.pyramidsTG[i].rotateAng), [modelObjects.pyramidsTG[i].rotate[0], modelObjects.pyramidsTG[i].rotate[1], modelObjects.pyramidsTG[i].rotate[2]]);	
+				
+				gl.bindBuffer(gl.ARRAY_BUFFER, pyramid.vertexPositionBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, pyramid.vertexPositionDataItemSize, gl.FLOAT, false, 0, 0);
+				
+				gl.bindBuffer(gl.ARRAY_BUFFER, pyramid.vertexColorBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, pyramid.vertexColorDataItemSize, gl.FLOAT, false, 0, 0);
+								
+				setMatrixUniforms();
+				gl.drawArrays(gl.TRIANGLES, 0, pyramid.vertexPositionDataNumItems);			
+			mvPopMatrix();
+		}
+		
+		for (i = 0; i < modelObjects.spheresTG.length; ++i){
+			mvPushMatrix();
+				mat4.scale(mvMatrix, [modelObjects.spheresTG[i].scale[0], modelObjects.spheresTG[i].scale[1], modelObjects.spheresTG[i].scale[2]]);
+				mat4.translate(mvMatrix, [modelObjects.spheresTG[i].translate[0], modelObjects.spheresTG[i].translate[1], modelObjects.spheresTG[i].translate[2]]);	
+				mat4.rotate(mvMatrix, degToRad(modelObjects.spheresTG[i].rotateAng), [modelObjects.spheresTG[i].rotate[0], modelObjects.spheresTG[i].rotate[1], modelObjects.spheresTG[i].rotate[2]]);				
+										
+				gl.bindBuffer(gl.ARRAY_BUFFER, sphere.vertexPositionBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphere.vertexPositionDataItemSize, gl.FLOAT, false, 0, 0);     
+				
+				gl.bindBuffer(gl.ARRAY_BUFFER, sphere.vertexColorBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphere.vertexColorDataItemSize, gl.FLOAT, false, 0, 0);
+					
+				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphere.vertexIndexBuffer);
+				setMatrixUniforms();
+				gl.drawElements(gl.TRIANGLES, sphere.vertexIndexDataNumItems, gl.UNSIGNED_SHORT, 0);
+			mvPopMatrix();
+		}
+		
+		for (i = 0; i < modelObjects.cubesTG.length; ++i){
+			mvPushMatrix();
+				mat4.scale(mvMatrix, [modelObjects.cubesTG[i].scale[0], modelObjects.cubesTG[i].scale[1], modelObjects.cubesTG[i].scale[2]]);
+				mat4.translate(mvMatrix, [modelObjects.cubesTG[i].translate[0], modelObjects.cubesTG[i].translate[1], modelObjects.cubesTG[i].translate[2]]);
+				mat4.rotate(mvMatrix, degToRad(modelObjects.cubesTG[i].rotateAng), [modelObjects.cubesTG[i].rotate[0], modelObjects.cubesTG[i].rotate[1], modelObjects.cubesTG[i].rotate[2]]);	
+								
+				gl.bindBuffer(gl.ARRAY_BUFFER, cube.vertexPositionBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, cube.vertexPositionDataItemSize, gl.FLOAT, false, 0, 0);
+				
+				gl.bindBuffer(gl.ARRAY_BUFFER, cube.vertexColorBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, cube.vertexColorDataItemSize, gl.FLOAT, false, 0, 0);
+								
+				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cube.vertexIndexBuffer);
+				setMatrixUniforms();
+				gl.drawElements(gl.TRIANGLES, cube.vertexIndexDataNumItems, gl.UNSIGNED_SHORT, 0);	
+			mvPopMatrix();
+		}
+    }
+	
+	function setOffsetValuesToPosition(initialization) {	
+		console.log("SliderColors - RGB " + aSliderColor.R + " " + aSliderColor.G + " " + aSliderColor.B + ", selected: " + getItemSelectedForColor());
+
+		var objectColorData = "";
+		if ((initialization != null && initialization == "cube") || getItemSelectedForColor() == "cube") {
+			gl.bindBuffer(gl.ARRAY_BUFFER, cube.vertexColorBuffer);	
+			objectColorData = cube.vertexColorData;
+		} else if ((initialization != null && initialization == "sphere") || getItemSelectedForColor() == "sphere") {
+			gl.bindBuffer(gl.ARRAY_BUFFER, sphere.vertexColorBuffer);	
+			objectColorData = sphere.vertexColorData;
+		} else if ((initialization != null && initialization == "pyramid") || getItemSelectedForColor() == "pyramid") {
+			gl.bindBuffer(gl.ARRAY_BUFFER, pyramid.vertexColorBuffer);	
+			objectColorData = pyramid.vertexColorData;
+		}
+		
+		if (objectColorData != "") {		
+			for (i = 0; i < objectColorData.length - 2; i = i + 3) {
+				objectColorData[i] = aSliderColor.R;
+				objectColorData[i + 1] = aSliderColor.G;
+				objectColorData[i + 2] = aSliderColor.B;
+			}
+			
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(objectColorData), gl.STATIC_DRAW);
+			updateSliderAndColorPicker();
+		}
+	}
+	
+	function writeListElements() {
+		var textObjectSelected = "None";
+		
+		document.getElementById("listCube").innerHTML = "";
+		for (var i = 0; i < modelObjects.cubesTG.length; i++)
+		{
+		    nameList = "<li class='clickable-text'" + "onclick=updateElementClicked('C'," + i + ")" + "> Cube: " + (i + 1) + "</li>";
+			if (modelObjects.cubesTG[i].selected) {
+				nameList = "<li class='clickable-text'" + "onclick=updateElementClicked('C'," + i + ")" + "> <b> Cube: " + (i + 1) + "</b></li>";
+				textObjectSelected = "Cube: " + (i + 1);
+			}
+		    document.getElementById("listCube").innerHTML += nameList;
+		}
+		
+		document.getElementById("listSphere").innerHTML = "";
+		for (var i = 0; i < modelObjects.spheresTG.length; i++)
+		{
+		    nameList = "<li class='clickable-text'" + "onclick=updateElementClicked('S'," + i + ")" + "> Sphere: " + (i + 1) + "</li>";
+			if (modelObjects.spheresTG[i].selected) {
+				nameList = "<li class='clickable-text'" + "onclick=updateElementClicked('S'," + i + ")" + "> <b> Sphere: " + (i + 1) + "</b></li>";
+				textObjectSelected = "Sphere: " + (i + 1);
+			}
+		    document.getElementById("listSphere").innerHTML += nameList;
+		}
+		
+		document.getElementById("listPyramids").innerHTML = "";
+		for (var i = 0; i < modelObjects.pyramidsTG.length; i++)
+		{
+		    nameList = "<li class='clickable-text'" + "onclick=updateElementClicked('P'," + i + ")" + "> Pyramid: " + (i + 1) + "</li>";
+			if (modelObjects.pyramidsTG[i].selected) {
+				nameList = "<li class='clickable-text'" + "onclick=updateElementClicked('P'," + i + ")" + "> <b> Pyramid: " + (i + 1) + "</b></li>";
+				textObjectSelected = "Pyramid: " + (i + 1);
+			}
+		    document.getElementById("listPyramids").innerHTML += nameList;
+		}	
+		
+		document.getElementById("text-object-selected").innerHTML = textObjectSelected;
+		toggleHideShow("unselect-item", true, "inline-block");
+	}
+	
+	var lastTime = 0;
+    function animate() {
+        var timeNow = new Date().getTime();
+        if (lastTime != 0) {
+            var elapsed = timeNow - lastTime;
+	
+			for (i = 0; i < modelObjects.pyramidsTG.length; ++i){
+				modelObjects.pyramidsTG[i].rotateAng += (90 * elapsed) / 1000.0;
+			}
+			
+			for (i = 0; i < modelObjects.spheresTG.length; ++i){
+				modelObjects.spheresTG[i].rotateAng += (90 * elapsed) / 1000.0;
+			}
+			
+			for (i = 0; i < modelObjects.cubesTG.length; ++i){
+				modelObjects.cubesTG[i].rotateAng += (90 * elapsed) / 1000.0;
+			}
+        }
+        lastTime = timeNow;
+    }
+	
+    function tick() {
+        requestAnimFrame(tick);
+        drawScene();
+        animate();
+    }
+	
+	function allowDrop(ev) {
+		ev.preventDefault();
+	}
+	
+	function drop(ev) {
+		console.log("Drop item: " + ev.screenX + ", " + ev.screenY);
+		
+		ev.preventDefault();
+		
+		if (draggedItem == "imgleft") {			
+			onButtonAddObjectClick("buttonAddCube");	
+		} else if (draggedItem == "imgcenter") {			
+			onButtonAddObjectClick("buttonAddSphere");	
+		} else if (draggedItem == "imgright") {
+			onButtonAddObjectClick("buttonAddPyramid");	
+		}			
+	}
+	
+	var draggedItem;
+	function drag(img) {
+		console.log("Dragging item: " + img);
+		draggedItem = img;
+	}
+	
+	function toggleHideShow(element, visible, inlineorinlineblock) {
+		var x = document.getElementById(element);
+		if (visible || x.style.display === "none") {
+			x.style.display = inlineorinlineblock;
+		} else {
+			x.style.display = "none";
+		}
+	}
+	
+	function getSelectedObject() {
+		for (i = 0; i < modelObjects.cubesTG.length; ++i){
+			if (modelObjects.cubesTG[i].selected) {
+				return modelObjects.cubesTG[i];
+			}
+		}
+		for (i = 0; i < modelObjects.spheresTG.length; ++i){
+			if (modelObjects.spheresTG[i].selected) {
+				return modelObjects.spheresTG[i];
+			}
+		}
+		for (i = 0; i < modelObjects.pyramidsTG.length; ++i){
+			if (modelObjects.pyramidsTG[i].selected) {
+				return modelObjects.pyramidsTG[i];
+			}
+		}
+	}
+	
+	function initializeControls() {
+		updateCameraValues();
+		setInputValue("position-x-input", "0.0");
+		setInputValue("position-y-input", "0.0");
+		setInputValue("position-z-input", "0.0");
+		setInputValue("rotation-a-input", "0");
+		setInputValue("rotation-x-input", "0");
+		setInputValue("rotation-y-input", "0");
+		setInputValue("rotation-z-input", "0");
+		setInputValue("scale-x-input", "1.0");
+		setInputValue("scale-y-input", "1.0");
+		setInputValue("scale-z-input", "1.0");
+	}
+	
+	function updateCameraValues() {
+		setInputValue("position-x-input-camera", camera.translate[0]);
+		setInputValue("position-y-input-camera", camera.translate[1]);
+		setInputValue("position-z-input-camera", camera.translate[2]);
+		setInputValue("rotation-a-input-camera", camera.rotateAng);
+		setInputValue("rotation-x-input-camera", camera.rotate[0]);
+		setInputValue("rotation-y-input-camera", camera.rotate[1]);
+		setInputValue("rotation-z-input-camera", camera.rotate[2]);
+		setInputValue("scale-x-input-camera", camera.scale[0]);
+		setInputValue("scale-y-input-camera", camera.scale[1]);
+		setInputValue("scale-z-input-camera", camera.scale[2]);
+	}
+	
+	function setInputValue(inputId, newValue) {
+		var input = document.getElementById(inputId);
+		input.value = parseFloat(newValue);
+	}
+	
+	function getInputValue(inputId) {
+		return document.getElementById(inputId).value;	
+	}	
+	
+	function modifyObjectTGFromControls(object) {		
+		if (object != null) {		
+			object.translate[0] = getInputValue("position-x-input");
+			object.translate[1] = getInputValue("position-y-input");
+			object.translate[2] = getInputValue("position-z-input");
+			object.rotateAng = getInputValue("rotation-a-input");
+			object.rotate[0] = getInputValue("rotation-x-input");
+			object.rotate[1] = getInputValue("rotation-y-input");
+			object.rotate[2] = getInputValue("rotation-z-input");
+			object.scale[0] = getInputValue("scale-x-input");
+			object.scale[1] = getInputValue("scale-y-input");
+			object.scale[2] = getInputValue("scale-z-input");
+		}
+	}
+	
+	function modifyObjectTGFromInput(inputId, inputValue) {
+		var object;
+		if (inputId.indexOf("camera") != -1) {
+			object = camera;
+			inputVar = inputId.split("-input-camera")[0];
+		} else {
+			object = getSelectedObject();
+			inputVar = inputId.split("-input")[0];
+		}
+		
+		if (object != null) {
+			modifyObjectTG(object, inputId.split("-input")[0], inputValue, true);
+		}
+	}
+	
+	function modifyObjectTG(object, inputVariable, inputValue, shouldUpdate) {
+		switch (inputVariable) {
+			case "position-x":
+				object.translate[0] = inputValue;
+				setInputValue("position-x-input", inputValue);
+				break;
+			
+			case "position-y":
+				object.translate[1] = inputValue;
+				setInputValue("position-y-input", inputValue);
+				break;
+			
+			case "position-z":
+				object.translate[2] = inputValue;
+				setInputValue("position-z-input", inputValue);
+				break;
+			
+			case "rotation-a":
+				object.rotateAng = inputValue;
+				setInputValue("rotation-a-input", inputValue);
+				break;
+			
+			case "rotation-x":
+				object.rotate[0] = inputValue;
+				setInputValue("rotation-x-input", inputValue);
+				break;
+			
+			case "rotation-y":
+				object.rotate[1] = inputValue;
+				setInputValue("rotation-y-input", inputValue);
+				break;
+			
+			case "rotation-z":
+				object.rotate[2] = inputValue;
+				setInputValue("rotation-z-input", inputValue);
+				break;
+			
+			case "scale-x":
+				object.scale[0] = inputValue;
+				setInputValue("scale-x-input", inputValue);
+				break;
+			
+			case "scale-y":
+				object.scale[1] = inputValue;
+				setInputValue("scale-y-input", inputValue);
+				break;
+			
+			case "scale-z":
+				object.scale[2] = inputValue;
+				setInputValue("scale-z-input", inputValue);
+				break;
+		}
+		
+		if (shouldUpdate) {
+			updateVisualElements();
+		}		
+	}
+	
+	function updateControlList() {
+		var selectedObject = getSelectedObject(); 
+		
+		if (selectedObject != null) {
+			setInputValue("position-x-input", selectedObject.translate[0]);
+			setInputValue("position-y-input", selectedObject.translate[1]);
+			setInputValue("position-z-input", selectedObject.translate[2]);
+			setInputValue("rotation-a-input", selectedObject.rotateAng);
+			setInputValue("rotation-x-input", selectedObject.rotate[0]);
+			setInputValue("rotation-y-input", selectedObject.rotate[1]);
+			setInputValue("rotation-z-input", selectedObject.rotate[2]);
+			setInputValue("scale-x-input", selectedObject.scale[0]);
+			setInputValue("scale-y-input", selectedObject.scale[1]);
+			setInputValue("scale-z-input", selectedObject.scale[2]);
+		}	
+	}
+	
+	function updateVisualElements() {
+		writeListElements();	
+		updateControlList();
+		updateCameraValues();
+		drawScene();	
+	}
+	
+	function unSelectObjectSelected() {
+		var selectedObject = getSelectedObject();
+		
+		if (selectedObject != null) {
+			selectedObject.selected = false;
+			updateVisualElements();
+			initializeControls();
+			toggleHideShow("unselect-item", false);
+		}
+	}
+	
+	function isSoundEnabled() {
+		return document.getElementById('checkbox-sounds').checked;
+	}
+</script>
+</head>
+
+<body onload="webGLStart();">	
+	<div class="row">
+		<div class="col col-4 col-border">
+			<p id="camera-tg" class="clickable-text" onclick="toggleHideShow('div-camera', null, 'block')"><b>Camera</b></p>
+			<div id="div-camera">
+				<div class="container-center-vertical">
+					<i style="margin-right: 5px;">Ortho</i>
+					<label class="switch" onchange="onSwitchChangedPosition()">
+					  <input id="switch-camera" type="checkbox">
+					  <span class="slider round"></span>
+					</label>
+					<i style="margin-left: 5px;">Persp</i>
+				</div>
+				
+				<p>Position [x, y, z]</p>	
+				<div class="divnext">
+					<input id="position-x-input-camera" type="number" class="inputTG" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">				
+					<input id="position-y-input-camera" type="number" class="inputTG" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">
+					<input id="position-z-input-camera" type="number" class="inputTG" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">				
+				</div>
+				
+				<p>Rotation [a, x, y, z]</p>	
+				
+				<div class="divnext">
+					<input id="rotation-a-input-camera" type="number" class="inputTG" step="1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div>
+					<div class="divnext">
+						<input id="rotation-x-input-camera" type="number" class="inputTG" step="1" max="1" min="-1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+					</div>
+					<div class="divnext">
+						<input id="rotation-y-input-camera" type="number" class="inputTG" step="1" max="1" min="-1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+					</div>
+					<div class="divnext">				
+						<input id="rotation-z-input-camera" type="number" class="inputTG" step="1" max="1" min="-1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+					</div>
+				</div>
+				
+				<p>Scale [x, y, z]</p>	
+				<div class="divnext">
+					<input id="scale-x-input-camera" type="number" class="inputTG" min="0" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">				
+					<input id="scale-y-input-camera" type="number" class="inputTG" min="0" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">
+					<input id="scale-z-input-camera" type="number" class="inputTG" min="0" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">				
+				</div>
+			</div>
+
+			<p id="control-tg" class="clickable-text" onclick="toggleHideShow('div-control', null, 'block')"><b>Controls</b></p>
+			<div id="div-control">
+				<p>Selected: <b id="text-object-selected">None</b> [<i id="unselect-item" class="clickable-text" onclick="unSelectObjectSelected();">Unselect</i>]</p>
+				
+				<p>Position [x, y, z]</p>	
+				<div class="divnext">
+					<input id="position-x-input" type="number" class="inputTG" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">				
+					<input id="position-y-input" type="number" class="inputTG" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">
+					<input id="position-z-input" type="number" class="inputTG" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">				
+				</div>
+				
+				<p>Rotation [a, x, y, z]</p>	
+				
+				<div class="divnext">
+					<input id="rotation-a-input" type="number" class="inputTG" step="1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div>
+					<div class="divnext">
+						<input id="rotation-x-input" type="number" class="inputTG" step="1" max="1" min="-1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+					</div>
+					<div class="divnext">
+						<input id="rotation-y-input" type="number" class="inputTG" step="1" max="1" min="-1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+					</div>
+					<div class="divnext">				
+						<input id="rotation-z-input" type="number" class="inputTG" step="1" max="1" min="-1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+					</div>
+				</div>
+				
+				<p>Scale [x, y, z]</p>	
+				<div class="divnext">
+					<input id="scale-x-input" type="number" class="inputTG" min="0" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">				
+					<input id="scale-y-input" type="number" class="inputTG" min="0" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">
+				</div>
+				<div class="divnext">
+					<input id="scale-z-input" type="number" class="inputTG" min="0" step=".1" onchange="modifyObjectTGFromInput(this.id, this.value)">				
+				</div>
+			</div>
+			
+			<p><b id="control-colors" class="clickable-text" onclick="toggleHideShow('div-colors', null, 'block')">Colors</b> [<i class="clickable-text" onclick="randomizeColorButton();">Randomize!</i>]</p>
+			<div id="div-colors">
+				<code id="selector-cube" class="clickable-text" onclick="onItemSelectedForColor('cube')">Cube</code> - 
+				<code id="selector-sphere" class="clickable-text" onclick="onItemSelectedForColor('sphere')">Sphere</code> -
+				<code id="selector-pyramid" class="clickable-text" onclick="onItemSelectedForColor('pyramid')">Pyramid</code>
+				<div class="row">
+					<div class="col col-1">
+						<div>
+							R: <input id="slider1" type="range" min="0.0" max="1.0" step="0.01" value ="0.0" oninput="onSliderChange(event);" style="width: 115px;" /> 
+						</div>
+						<div>
+							G: <input id="slider2" type="range" min="0.0" max="1.0" step="0.01" value ="0.0" oninput="onSliderChange(event);" style="width: 115px;" />
+						</div>
+						<div>
+							B: <input id="slider3" type="range" min="0.0" max="1.0" step="0.01" value ="0.0" oninput="onSliderChange(event);" style="width: 115px;" />
+						</div>
+					</div>
+					
+					<div class="col col-1">
+						<input id="slider0" type="color" class="inputcolor" oninput="onColorPickerChange(event)";/>
+					</div>
+				</div>
+				
+				<div class="container-center-vertical" style="margin-top: 5px;">
+					<label id="fragment" class="checkbox" onchange="onCheckboxChangedPosition(this.id)">
+					  <input id="checkbox-fragment" type="checkbox">
+					  <span class="checkmark"></span>
+					</label>		
+					<i style="margin-left: 10px;  margin-top: 10px;"> Pintat per FragmentShader</i>
+					<input id="slider-fragment-shader" type="range" min="0.2" max="0.8" step="0.01" value="0.3" oninput="onCheckboxSliderChangedPosition(this.value);" />
+				</div>
+				<div class="container-center-vertical" style="margin-top: 5px;">
+					<label id="vertex" class="checkbox" onchange="onCheckboxChangedPosition(this.id)">
+					  <input id="checkbox-vertex" type="checkbox">
+					  <span class="checkmark"></span>
+					</label>		
+					<i style="margin-left: 10px; margin-top: 10px;"> Pintat per VertexShader</i>
+				</div>
+			</div>
+			
+			<div class="container-center-vertical" style="margin-top: 5px;">
+				<label id="vertex" class="checkbox">
+				  <input id="checkbox-sounds" type="checkbox">
+				  <span class="checkmark"></span>
+				</label>		
+				<i style="margin-left: 10px; margin-top: 10px;"> Enable sounds</i>
+			</div>
+		</div>	
+		
+		<div class="col col-1 col-border">
+			<div class="row">
+				<div class="col col-1">
+					<canvas id="practica1-canvas" class="border" ondrop="drop(event)" ondragover="allowDrop(event)"></canvas>
+				</div>
+			</div>
+			<div class="row">
+				<div class="col col-1 col-border">
+					<div class="col col-3 col-centered">
+						<div id="square_left">
+							<img id="imgleft" class="border contentsize" src="img/cube.png" draggable="true" ondragstart="drag(this.id)">
+							<p>Drag to add a Cube</p>
+						</div>				
+					</div>
+					<div class="col col-3">
+						<p><b>List of Cubes </b><button id="buttonAddCube" type="button" onclick="onButtonAddObjectClick(this.id);">+</button></p>
+						<p id="listCube" class="nodot"></p>
+					</div>
+				</div>
+				<div class="col col-1 col-border">
+					<div class="col col-3 col-centered">
+						<div id="square_center">
+							<img id="imgcenter" class="border contentsize" src="img/sphere.png" draggable="true" ondragstart="drag(this.id)">
+							<p>Drag to add a Sphere</p>
+						</div>
+					</div>
+					<div class="col col-3">
+						<p><b>List of Spheres </b><button id="buttonAddSphere" type="button" onclick="onButtonAddObjectClick(this.id);">+</button></p>
+						<p id="listSphere" class="nodot"></p>
+					</div>
+				</div>
+				<div class="col col-1 col-border">
+					<div class="col col-3 col-centered">
+						<div id="square_right">
+							<img id="imgright" class="border contentsize" src="img/pyramid.png" draggable="true" ondragstart="drag(this.id)">
+							<p>Drag to add a Pyramid</p>
+						</div>	
+					</div>
+					<div class="col col-3">
+						<p><b>List of Pyramids </b><button id="buttonAddPyramid" type="button" onclick="onButtonAddObjectClick(this.id);">+</button></p>
+						<p id="listPyramids" class="nodot"></p>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</body>
+
+</html>
